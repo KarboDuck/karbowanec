@@ -200,26 +200,28 @@ public:
     s(m_bs.m_blockIndex, "block_index");
 
     logger(INFO) << operation << "transaction map...";
-    //s(m_bs.m_transactionMap, "transactions");
-    if (s.type() == ISerializer::INPUT) {
+    s(m_bs.m_transactionMap, "transactions");
+    // Could this speed load/dump cause corruption???
+    /*if (s.type() == ISerializer::INPUT) {
       phmap::BinaryInputArchive ar_in(appendPath(m_bs.m_config_folder, "transactionsmap.dat").c_str());
       m_bs.m_transactionMap.phmap_load(ar_in);
     }
     else {
       phmap::BinaryOutputArchive ar_out(appendPath(m_bs.m_config_folder, "transactionsmap.dat").c_str());
       m_bs.m_transactionMap.phmap_dump(ar_out);
-    }
+    }*/
 
     logger(INFO) << operation << "spent keys...";
-    //s(m_bs.m_spent_key_images, "spent_keys");
-    if (s.type() == ISerializer::INPUT) {
+    s(m_bs.m_spent_key_images, "spent_keys");
+    // Could this speed load/dump cause corruption???
+    /*if (s.type() == ISerializer::INPUT) {
       phmap::BinaryInputArchive ar_in(appendPath(m_bs.m_config_folder, "spentkeys.dat").c_str());
       m_bs.m_spent_key_images.phmap_load(ar_in);
     }
     else {
       phmap::BinaryOutputArchive ar_out(appendPath(m_bs.m_config_folder, "spentkeys.dat").c_str());
       m_bs.m_spent_key_images.phmap_dump(ar_out);
-    }
+    }*/
 
     logger(INFO) << operation << "outputs...";
     s(m_bs.m_outputs, "outputs");
@@ -341,7 +343,7 @@ private:
 };
 
 
-Blockchain::Blockchain(const Currency& currency, tx_memory_pool& tx_pool, ILogger& logger, bool blockchainIndexesEnabled) :
+Blockchain::Blockchain(const Currency& currency, tx_memory_pool& tx_pool, ILogger& logger, bool blockchainIndexesEnabled, bool allowDeepReorg) :
 logger(logger, "Blockchain"),
 m_currency(currency),
 m_tx_pool(tx_pool),
@@ -350,7 +352,7 @@ m_upgradeDetectorV2(currency, m_blocks, BLOCK_MAJOR_VERSION_2, logger),
 m_upgradeDetectorV3(currency, m_blocks, BLOCK_MAJOR_VERSION_3, logger),
 m_upgradeDetectorV4(currency, m_blocks, BLOCK_MAJOR_VERSION_4, logger),
 m_upgradeDetectorV5(currency, m_blocks, BLOCK_MAJOR_VERSION_5, logger),
-m_checkpoints(logger),
+m_checkpoints(logger, allowDeepReorg),
 m_paymentIdIndex(blockchainIndexesEnabled),
 m_timestampIndex(blockchainIndexesEnabled),
 m_generatedTransactionsIndex(blockchainIndexesEnabled),
@@ -565,6 +567,7 @@ bool Blockchain::init(const std::string& config_folder, bool load_existing) {
     << "Blockchain initialized. last block: " << m_blocks.size() - 1 << ", "
     << Common::timeIntervalToString(timestamp_diff)
     << " time ago, current difficulty: " << getDifficultyForNextBlock(getTailId());
+
   return true;
 }
 
@@ -2008,8 +2011,10 @@ uint64_t Blockchain::get_adjusted_time() {
 
 bool Blockchain::check_block_timestamp_main(const Block& b) {
   if (b.timestamp > get_adjusted_time() + m_currency.blockFutureTimeLimit(b.majorVersion)) {
+    time_t t = static_cast<time_t>(b.timestamp);
+    auto tm = *std::localtime(&t);
     logger(INFO, BRIGHT_WHITE) <<
-      "Timestamp of block with id: " << get_block_hash(b) << ", " << b.timestamp << ", bigger than adjusted time + 28 min.";
+      "Timestamp of block with id: " << get_block_hash(b) << ", " << b.timestamp << " (" << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << ") is too far in the future";
     return false;
   }
 
@@ -2038,9 +2043,10 @@ bool Blockchain::check_block_timestamp(std::vector<uint64_t> timestamps, const B
   uint64_t median_ts = Common::medianValue(timestamps);
 
   if (b.timestamp < median_ts) {
-    logger(INFO, BRIGHT_WHITE) <<
-      "Timestamp of block with id: " << get_block_hash(b) << ", " << b.timestamp <<
-      ", less than median of last " << m_currency.timestampCheckWindow(b.majorVersion) << " blocks, " << median_ts;
+    logger(INFO, BRIGHT_WHITE)
+      << "Timestamp of block with id " << get_block_hash(b) << ", " << b.timestamp
+      << " is less than median of last " << m_currency.timestampCheckWindow(b.majorVersion) << " blocks, " 
+      << median_ts << ", i.e. it's too deep in the past";
     return false;
   }
 

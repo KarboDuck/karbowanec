@@ -69,15 +69,15 @@ private:
   friend class Core;
 };
 
-Core::Core(const Currency& currency, i_cryptonote_protocol* pprotocol, Logging::ILogger& logger, System::Dispatcher& dispatcher, bool blockchainIndexesEnabled) :
+Core::Core(const Currency& currency, i_cryptonote_protocol* pprotocol, Logging::ILogger& logger, System::Dispatcher& dispatcher, bool blockchainIndexesEnabled, bool allowDeepReorg) :
   m_dispatcher(dispatcher),
   m_currency(currency),
   logger(logger, "Core"),
   m_mempool(currency, m_blockchain, *this, m_timeProvider, logger, blockchainIndexesEnabled),
-  m_blockchain(currency, m_mempool, logger, blockchainIndexesEnabled),
+  m_blockchain(currency, m_mempool, logger, blockchainIndexesEnabled, allowDeepReorg),
   m_miner(new miner(currency, *this, logger)),
   m_starter_message_showed(false),
-  m_checkpoints(logger) {
+  m_checkpoints(logger, allowDeepReorg) {
     set_cryptonote_protocol(pprotocol);
     m_blockchain.addObserver(this);
     m_mempool.addObserver(this);
@@ -512,7 +512,7 @@ bool Core::get_block_template(Block& b, const AccountKeys& acc, difficulty_type&
     b = boost::value_initialized<Block>();
     b.majorVersion = m_blockchain.getBlockMajorVersionForHeight(height);
     b.previousBlockHash = get_tail_id();
-    b.timestamp = static_cast<uint64_t>(time(nullptr));
+    b.timestamp = time(nullptr);
     diffic = m_blockchain.getDifficultyForNextBlock(b.previousBlockHash);
     if (!(diffic)) {
       logger(ERROR, BRIGHT_RED) << "difficulty overhead.";
